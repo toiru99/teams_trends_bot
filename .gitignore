@@ -14,6 +14,19 @@ logs/
 *.sqlite3
 cron/output/
 
+# === Hermes 런타임 캐시·락 (실행 시 자동 생성) ===
+.skills_prompt_snapshot.json
+auth.lock
+*.lock
+models_dev_cache.json
+checkpoints/
+
+# === 에이전트 개인 데이터 (PUBLIC repo 유출 방지 — 필요시 직접 해제) ===
+SOUL.md
+memories/
+USER.md
+MEMORY.md
+
 # === Hermes 코드 설치본 (각 PC 에 따로 설치, repo 에 넣지 않음) ===
 hermes-agent/
 .venv/
