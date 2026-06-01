@@ -1,0 +1,32 @@
+# === 시크릿 — 절대 커밋 금지 ===
+.env
+auth.json
+*.key
+*.pem
+
+# === Hermes 런타임/세션 상태 (머신 종속, 이식 대상 아님) ===
+sessions/
+logs/
+*.log
+*.pid
+*.db
+*.sqlite
+*.sqlite3
+cron/output/
+
+# === Hermes 코드 설치본 (각 PC 에 따로 설치, repo 에 넣지 않음) ===
+hermes-agent/
+.venv/
+venv/
+
+# === Python ===
+__pycache__/
+*.pyc
+
+# === OS 부산물 ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === 로컬 IDE/도구 상태 ===
+.claude/settings.local.json

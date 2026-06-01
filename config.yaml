@@ -1,0 +1,33 @@
+# =============================================================================
+# Hermes Agent — AI Trends → Teams 자동 큐레이션
+# 이 파일이 있는 폴더가 곧 HERMES_HOME 입니다 (USB / Git repo).
+# bootstrap 스크립트(bin/)가 HERMES_HOME 을 이 폴더로 지정합니다.
+# 시크릿은 여기 두지 말 것 — .env 로만 (gitignore 됨).
+# =============================================================================
+
+model:
+  default: accounts/fireworks/models/kimi-k2p6
+  provider: custom:fireworks
+  base_url: https://api.fireworks.ai/inference/v1
+
+custom_providers:
+  - name: fireworks
+    base_url: https://api.fireworks.ai/inference/v1
+    key_env: FIREWORKS_API_KEY      # 실제 키는 .env 의 FIREWORKS_API_KEY 에서 읽음
+
+# -----------------------------------------------------------------------------
+# 도구(toolset) 활성화
+# -----------------------------------------------------------------------------
+# 권위 있는 방법: 최초 1회 `hermes tools` (또는 `hermes setup --portal`) 실행.
+# 이 스킬(ai-trends-filter)이 필요로 하는 toolset:
+#   - browser : 페이지를 직접 열어 확인/검증 (agent-browser CLI 필요: npm i -g agent-browser)
+#   - code    : execute_code 로 스크래핑·PDF·파일 I/O (Windows 에서 특히 권장)
+#   - web     : 웹 fetch / search
+#
+# 문서 기준: browser toolset 은 config 의 toolsets 목록에 포함돼야 활성화됩니다.
+# `hermes tools` 로 켜면 아래에 자동으로 기록됩니다. 수동 편집보다 `hermes tools` 권장.
+#
+# toolsets:
+#   - browser
+#   - code
+#   - web
