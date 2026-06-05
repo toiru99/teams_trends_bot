@@ -21,6 +21,12 @@ auth.lock
 models_dev_cache.json
 checkpoints/
 
+# === 조사/실행 중 생기는 임시 산출물 (PDF·중간 JSON·사용량) ===
+*.pdf
+tmp_*.json
+*.usage.json
+.usage.json
+
 # === 에이전트 개인 데이터 (PUBLIC repo 유출 방지 — 필요시 직접 해제) ===
 SOUL.md
 memories/

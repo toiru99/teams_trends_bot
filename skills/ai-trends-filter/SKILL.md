@@ -1,7 +1,7 @@
 ---
 name: ai-trends-filter
 description: AI 랩·팀의 현재 관심사에 맞춰 GitHub trending / arXiv / 모델 출시 노트 / 산업 발표 등 외부 AI 트렌드 후보를 필터링하고, 채택된 항목을 Microsoft Teams 채널에 AdaptiveCard로 게시한다. 매일 11:50 KST (Asia/Seoul, AM) Hermes cron 으로 실행.
-version: 0.1.0
+version: 0.5.0
 platforms: [linux, macos, windows]
 metadata:
   hermes:
@@ -63,29 +63,18 @@ prerequisites:
 
 **경로 룰**: 모든 hermes 데이터는 `HERMES_HOME` 환경변수에 정의된 경로 아래에 있다. 절대 경로를 직접 쓰지 말고 — 머신·OS·USB 드라이브마다 다르므로 — 항상 `os.environ["HERMES_HOME"]` 으로 시작하라.
 
-후보 평가 전 반드시 다음 두 파일을 먼저 읽는다.
+후보 평가 전 반드시 다음을 먼저 로드한다.
 
-1. **`$HERMES_HOME/trend_history.jsonl`** — 한 줄씩 JSON. 마지막 7일치만 추려 메모리에 보유:
+1. **게시 이력 (dedup 기준)** — 인라인으로 재구현하지 말고 **결정론 헬퍼 `trends_util` 을 import** 해서 쓴다:
    ```python
-   import os, json
-   from datetime import datetime, timedelta, timezone
-   from pathlib import Path
-
-   hermes_home = Path(os.environ["HERMES_HOME"])
-   cutoff = datetime.now(timezone.utc) - timedelta(days=7)
-   path = hermes_home / "trend_history.jsonl"
-   recent = []
-   if path.exists():
-       for line in path.read_text(encoding="utf-8").splitlines():
-           if not line.strip(): continue
-           rec = json.loads(line)
-           ts = datetime.fromisoformat(rec["ts"])
-           if ts >= cutoff:
-               recent.append(rec)
+   import os, sys
+   sys.path.insert(0, os.path.join(os.environ["HERMES_HOME"], "skills", "ai-trends-filter", "scripts"))
+   import trends_util as tu
+   recent = tu.recent_history(7)     # 최근 7일 레코드 (경로·날짜필터는 코드가 처리)
    ```
-   이 `recent` 리스트가 Step 0 의 dedup 기준이다.
+   이 `recent` 가 Step 0 의 dedup 기준이다. (이력 경로는 `trends_util` 이 post_to_teams 의 쓰기 경로와 단일화하므로 읽기/쓰기 불일치 없음.)
 
-2. **`$HERMES_HOME/lab_context.md`** (선택) — 진행 과제·사내 도구·시한이 있는 의사결정 작성. 있으면 Step 2 (진행 과제 매핑) 점수의 근거로 사용. 없으면 일반 카테고리로 판정.
+2. **`$HERMES_HOME/lab_context.md`** (선택) — 진행 과제·사내 도구·시한이 있는 의사결정. 있으면 Step 2 (진행 과제 매핑) 점수의 근거. 없으면 일반 카테고리로 판정.
 
 ## 관심사 입력 — `lab_context.md` 가 비어있다면 호출 시 제공 권장
 
@@ -99,37 +88,56 @@ prerequisites:
 
 ## 소스 (정기 모니터링)
 
-새 후보 발굴은 다음 4개 버킷에서 한다. 매일 1회 훋는다.
+새 후보 발굴은 다음 5개 버킷에서 한다. 매일 1회 훑는다.
 
-> **평가 시 원본을 직접 요청해야 한다.** 사이트별 요청 차단(403/451) 혹은 SPA 도람 문제가 많다. 해결 코드와 패턴은 `references/scraping_tips.md`를 참조한다. **최근 실행에서 어떤 소스가 망가졌는지는 `references/source-status-YYYY-MM-DD.md` 파일들에 기록된다.**
+> **평가 시 원본을 직접 요청해야 한다.** 사이트별 요청 차단(403/451) 혹은 SPA 하이드레이션 문제가 많다. 해결 코드와 패턴은 `references/scraping_tips.md`를 참조한다. **최근 실행에서 어떤 소스가 망가졌는지는 `references/source-status-YYYY-MM-DD.md` 파일들에 기록된다.**
 
-**1) 뉴스**
-| 소스 | URL |
-|---|---|
-| The Verge — AI | https://www.theverge.com/ai-artificial-intelligence |
-
-**2) 저장소**
+**1) 저장소**
 | 소스 | URL |
 |---|---|
 | GitHub Trending | https://github.com/trending (필터: 언어/기간) |
 
-**3) 논문**
+**2) 논문**
 | 소스 | URL |
 |---|---|
 | HuggingFace Papers | https://huggingface.co/papers |
-| alphaXiv | https://www.alphaxiv.org/ (2026-05-29 기준: SPA hydrate로 자동 추출 불가. 일일 모니터링에서 제외 처리) |
+| arXiv (cs.AI / cs.CL / cs.LG 최신) | https://arxiv.org/list/cs.AI/recent (abstract 는 arxiv.org/abs 직접) |
 
-**4) 모델 공식 발표** (신규 모델·버전·가격 변경)
+**3) 모델 공식 발표** (신규 모델·버전·가격 변경)
 | 소스 | URL |
 |---|---|
 | OpenAI Platform changelog | https://platform.openai.com/docs/changelog |
-| Anthropic News / Release notes | https://www.anthropic.com/news (직접 HTML 파싱 우선, jina.ai는 nav-only) |
-| Google AI / DeepMind Blog | https://blog.google/technology/ai/ · https://deepmind.google/discover/blog/ (jina.ai nav-only 빈번) |
-| Meta AI | https://ai.meta.com/blog/ (jina.ai nav-only 빈번) |
-| Mistral News | https://mistral.ai/news (jina.ai nav-only 빈번) |
-| HuggingFace Hub Trending Models | https://huggingface.co/models?sort=trending (DOM 변경으로 정규식 빈번) |
+| Anthropic News / Release notes | https://www.anthropic.com/news (직접 HTML 파싱 우선) |
+| Google AI / DeepMind Blog | https://blog.google/technology/ai/ · https://deepmind.google/discover/blog/ |
+| Meta AI / Mistral | https://ai.meta.com/blog/ · https://mistral.ai/news |
 
-추가 소스(컨퍼런스 노트, 해커톤 결과, 회사별 X 공식 계정)는 자유. 위 버킷은 기본 정기 모니터링 대상.
+**4) 공식 블로그·전략 리포트** (사람 채널이 실제로 자주 인용 — 신설)
+| 소스 | URL |
+|---|---|
+| Anthropic Blog | https://claude.com/blog (트렌드·사례·템플릿 글 다수) |
+| OpenAI Blog | https://openai.com/news/ |
+| MIT Technology Review — AI | https://www.technologyreview.com/topic/artificial-intelligence/ |
+| 국내 AI 뉴스 | AI타임스(aitimes.com / aitimes.kr) 등 — 국내 관점·번역 소식 |
+
+**5) 소셜·기타**
+| 소스 | URL |
+|---|---|
+| 주요 인물·기관 X 공식 계정 | 연구자·랩 공식 발표 (예: 데모·티저). 1차 출처로 점프 필수 |
+| 컨퍼런스 노트·해커톤·릴리스 페이지 | 자유 |
+
+### 선별 원칙 (주제 화이트리스트가 아님)
+
+판단 기준은 **고정된 주제 목록이 아니라 다음 한 가지**다:
+
+> **"응용 AI·에이전트를 만드는 우리 팀이 지금 하는 일(5축 + lab_context 과제)에 실질적으로 닿는가?"**
+
+- 어느 주제든 5축(Core Product / Platform / Deployment·AX / Tooling·Harness / R&D) 중 하나 이상에 구체적으로 연결되면 후보다. **새로운 유형의 트렌드도 환영** — 아래 목록에 없다는 이유로 떨어뜨리지 말 것.
+- 반대로 화제성만 높고 우리 일과 매핑이 안 되면 점수가 낮아야 한다(Step 1~3 가 이를 처리).
+- 깊이 있는 분석감이면 길게, 단순히 흥미로운 데모·도구면 가볍게 — 둘 다 게재 가능(분량은 Step 5 규칙).
+
+**참고용 예시 (지금까지 자주 닿았던 결, 비한정·비배타)**: 에이전트 오케스트레이션·장기실행, 메모리/컨텍스트, 딥리서치, 에이전트 플랫폼·인프라·샌드박스·비용/게이트웨이, 벤치마크 공개, AX·도메인 에이전트 템플릿, 미디어 생성, 학습·효율·양자화, RAG·검색 진화 등. — 이건 **방향 감각용 예시일 뿐 점수 규칙이 아니다.** 실제 점수는 항상 Step 1~3(5축·과제매핑·유사도)로 매긴다.
+
+> recency: 트렌드 채널이므로 **기준일 기준 14일 이내** 소식을 우선한다. 자세한 규칙은 Step 0·Step 4 참조.
 
 ## 입력 (후보)
 
@@ -154,8 +162,9 @@ prerequisites:
 - 지역 한정 + API 없음 + 직접 테스트 불가
 - 이미 채택·운영 중인 도구의 마이너 버전업 (예: x.4 → x.4.1)
 - 단순 벤치마크 1~2% 향상에 그치고 응용/워크플로우 통찰 없음
-- **URL 중복**: 후보의 1차 출처 URL 이 Step −1 에서 로드한 `recent` 이력의 `source_url` 과 정확히 일치
-- **의미 중복**: URL 이 달라도 후보 핵심 한줄이 `recent` 이력의 어떤 `summary` 와 같은 사건을 가리키는 경우. 판단 기준:
+- **신선도(recency)**: 1차 출처의 **발표일이 기준일(오늘)로부터 30일 초과**면 원칙적으로 폐기. 단, **산업 전략 변화·지속가치(evergreen) 리포트**(예: 패러다임 정리, 도입 프레임워크)는 예외로 통과 가능 — 이런 예외는 드물어야 한다.
+- **URL 중복 (코드로 판정)**: `trends_util.is_duplicate_url(url, recent)` 가 True 면 폐기. 정확 일치 비교는 LLM 이 눈으로 하지 말고 **반드시 이 헬퍼로** (정규화 포함, 결정론).
+- **의미 중복 (LLM 판단)**: URL 이 달라도 후보 핵심 한줄이 `recent` 이력의 어떤 `summary` 와 같은 사건을 가리키는 경우. 판단 기준:
   - 같은 모델·릴리스·논문·저장소를 다른 매체가 보도한 경우 → 중복
   - 후속 마이너 업데이트(같은 프로덕트의 v1.0.1 → v1.0.2 식) → 중복
   - 새로운 사실·새로운 비교군·새로운 기능이 추가됐다면 → 중복 아님 (이전 카드 보완)
@@ -164,6 +173,13 @@ prerequisites:
 ### Step 0.5 — 원본 직접 평가 (깊이 분석)
 
 후보 한 건마다 **원본을 직접 받아 들여다본다**. 페이지 요약·트윗·메타데이터로 점수 매기지 말 것. 다음 절차는 게재 후보가 될 만한 모든 항목에 적용한다.
+
+> **⚠️ 1차 출처 우선 — 2차 매체로 후퇴 금지 (핵심).**
+> `requests.get()` 이 403/451/빈 본문을 주는 사이트(특히 **Anthropic·OpenAI·Google 등 공식 블로그/changelog**)가 많다. 이때 **AI Times 같은 2차 매체 요약으로 후퇴하지 말 것.**
+> 1. **`html = tu.fetch(url)`** — requests→jina.ai 결정론 escalation을 코드가 처리. 본문이면 그대로 사용.
+> 2. **`tu.fetch` 가 `None` 이면 → `agent-browser` 로 1차 URL 을 직접 열어** 렌더링된 본문(가격표·기능·벤치 표)을 읽는다. Chrome 이 떠 있으면 `/browser connect`. (어떤 셀렉터·어떻게 파싱할지는 사이트마다 달라 **LLM 판단 영역**)
+> - 새로 만난 차단·우회 패턴은 **`references/scraping_tips.md` 에 한 줄 누적**한다(자가학습 — 다음 run 이 같은 시행착오 반복 안 하도록).
+> - **2차 매체만 읽고 "1차 미확인"으로 카드 쓰지 말 것** — 그건 사람 큐레이터보다 명백히 얕은 결과를 낳는다(검증된 실패 패턴).
 
 #### 논문 (HuggingFace Papers / alphaXiv / arXiv / 모델 카드 동봉 논문)
 
@@ -260,11 +276,15 @@ AI 랩의 일반적 관심 영역 5축. 어느 영역이 강한지는 팀마다 
 
 ### Step 4 — 합산 및 분류
 
-**총점 = max(5축 점수) + Step 2 + Step 3** → 최대 9점.
+**총점 = max(5축 점수) + Step 2 + Step 3 + 신선도(freshness)** → 최대 10점.
 
+**신선도(freshness)** — 발표일 *추출*은 LLM(원문에서), *날짜 계산·가점*은 코드: `tu.freshness_bonus("2026-05-28")` → 14일 이내 +1, 그 외 0. (30일 초과 하드게이트는 Step 0; 전략·지속가치 예외만 통과해 +0)
+
+분류:
 - **≥ 5점**: 게재 (Step 5 진행)
 - **3~4점**: 보류 — "어떤 조건이 추가되면 채택?" 1줄
 - **≤ 2점**: 폐기 — 사유 1줄
+- **동점 시**: 더 최신 + 진행 과제에 더 가까운 것을 우선해 Top 3 선정
 
 **예외 상승 조건** (점수 무관 게재):
 - 사내 인프라·도구의 직접 보완 도구
@@ -275,12 +295,45 @@ AI 랩의 일반적 관심 영역 5축. 어느 영역이 강한지는 팀마다 
 
 채택된 후보를 다음 호출로 Teams 채널에 게시한다. **수신자 = 이 트렌드를 처음 보는 동료**.
 
-**Step 0.5 에서 PDF 전체 / 코드베이스 / changelog 를 다 읽었으니, 그 깊이가 카드에 드러나야 한다.** 키워드 나열·단편 정보로 압축하지 말 것. 카드 한 장 = brief 한 장 분량으로 작성.
+**Step 0.5 에서 PDF 전체 / 코드베이스 / changelog 를 다 읽었으니, 그 깊이가 카드에 드러나야 한다.** 키워드 나열·단편 정보로 압축하지 말 것.
 
-**분량 가이드**:
-- 카드 한 장당 **7~10 bullet**, 각 bullet **100~300자** (총 1500~2500자 수준)
+**분량 가이드 — 후보 유형에 맞춰 유연하게** (사람 채널도 심층글 7섹션 ~ 가벼운 공유 2~3줄까지 편차가 큼):
+
+| 후보 유형 | 분량 | 비고 |
+|---|---|---|
+| **심층** (오픈소스 도구 / 논문 / 전략 리포트) | 7~10 bullet, 각 100~300자 (총 1500~2500자) | 800자 미만이면 "왜 깊이 안 봤나" 재검토 |
+| **모델 출시** | 5~8 bullet | 가격·컨텍스트·벤치·기능 매트릭스 중심 |
+| **가벼운 공유** (흥미로운 데모·도구·X 글) | 3~5 bullet, 짧게 | 800자 하한 **적용 안 함**. 핵심 + 링크 + 우리에게 의미 한 줄이면 충분 |
+
 - 너무 길어지면 카드 두 장으로 분리, 두 번째 카드 제목 끝에 ` (2/2)` 표기
-- 너무 짧으면 (총 800자 미만이면) "왜 깊이 안 봤나" 자체 검토 후 다시 작성
+- **유형 판단**은 Step 0.5 의 후보 성격(저장소/논문/모델/리포트/단순공유)에 따른다. 아래 유형별 bullet 구조 참조.
+
+#### ★ 카드 생성 방식 — 3단 파이프라인 (심층 후보 필수, 가벼운 공유는 생략)
+
+**한 번에 모든 섹션을 쓰지 말 것.** 한 호출에서 7~10개 칸을 동시에 채우면 attention 이 분산돼 칸마다 얕아지고 반복된다. 그런데 "섹션별로 따로 써라"고 **글로 지시하면 에이전트가 결국 한 방에 생성**하는 것이 검증됨 → 그래서 **섹션별 생성을 코드가 강제**한다. 직접 인라인으로 7개 섹션을 쓰지 말고 **반드시 `card_pipeline.build_deep_card()` 를 호출**하라:
+
+```python
+import os, sys
+sys.path.insert(0, os.path.join(os.environ["HERMES_HOME"], "skills", "ai-trends-filter", "scripts"))
+import card_pipeline as cp
+from post_to_teams import post_card
+
+# 5-A) Step 0.5 의 1차 실측 결과를 '증거 노트' 텍스트로 정리 (수치·인용위치·한계·가격·경쟁대안 고유명·발표일)
+evidence = """... PDF/원문에서 직접 뽑은 사실들 ..."""
+
+# 5-B+5-C) 코드가 섹션마다 독립 LLM 호출 → 종합(중복제거·경쟁구도·한국어 교정·분량)
+card = cp.build_deep_card(evidence, card_type="paper")   # paper|github|model|report
+
+# 게시
+post_card(title=card["title"], bullets=card["bullets"], facts=card.get("facts"),
+          source_url="https://arxiv.org/abs/XXXX.XXXXX")
+```
+
+- **5-A (에이전트 몫)**: 깊은 읽기로 **증거 노트** 작성. 노트 품질이 카드 품질을 좌우 — 수치·인용위치·경쟁 대안 고유명까지 담아라.
+- **5-B+5-C (코드 몫, `build_deep_card`)**: 섹션마다 따로 호출(attention 집중) → 종합 1회에서 중복제거·경쟁구도 보강·**한국어 교정**·분량 조정. 에이전트가 한 방에 합치는 것을 코드가 차단.
+- 가벼운 공유 유형은 이 파이프라인 생략(짧게 직접 작성).
+
+> 목표: "성실한 칸 채우기" → "관점 가진 애널리스트 브리핑". 종합 단계가 사람 글과의 마지막 깊이 격차(포지셔닝·통찰)와 한국어 품질을 함께 잡는다.
 
 #### 카드 bullet 구조 (필수 라벨 그대로)
 
@@ -307,13 +360,26 @@ AI 랩의 일반적 관심 영역 5축. 어느 영역이 강한지는 팀마다 
   - **`【벤치마크】`** (150~250자) — 주요 평가 셋 점수, 비교 모델, "특정 셋팅만 우월" 패턴 여부 평가.
   - **`【기능 매트릭스】`** (100~200자) — function calling, tool use, vision, structured output 등 지원 여부 + 이전 모델 대비 차이.
 
-* **뉴스**: 1차 출처가 paper/repo/model 중 어느 것이냐에 따라 위 깊이 bullet 적용.
+* **전략 리포트 / 산업 트렌드** (Anthropic·MIT TR 등 외부 아티클 다이제스트):
+  - **`【핵심 주장】`** (200~300자) — 리포트의 중심 논지. 번호 트렌드형이면 핵심 3~5개를 추려 각 1줄.
+  - **`【근거·수치】`** (150~250자) — 인용된 정량 근거 ("85% 조직이 …", "27% 작업이 …" 등) + 사례 1~2개.
+  - **`【시사점】`** (150~250자) — 우리 전략·로드맵에 주는 함의.
 
-**공통 마무리 bullet (모든 후보 필수)**:
+* **벤치마크 공개**:
+  - **`【무엇을 측정】`** (150~250자) — 과제 정의·평가 방식.
+  - **`【현 수준】`** (150~250자) — 프런티어 모델 점수·한계 ("전부 50% 못 넘김" 식 정량).
 
-- **`【지금 왜 트렌드인가】`** (150~250자) — 별 수 급증, 주요 라이브러리/플랫폼 채택, 베타 신청 쇄도, 산업 발표 등 구체 화제성 신호. "주목받는다" 같은 모호 표현 금지.
-- **`【우리에게 의미】`** (150~250자) — 운영 시스템 / 진행 과제 / 도입 트랙 중 어디에 닿는지. lab_context 비어있으면 일반 AI 랩 관점에서.
-- **`【필수 메타】`** (한 줄에 압축) — 별 수·라이선스·가격·접근성·재현 코드 유무 등 압축.
+* **가벼운 공유** (흥미로운 데모·도구·X 글 — 짧게):
+  - 위 깊이 bullet 생략 가능. `【무엇】` + 링크 + `【우리에게 의미】` 한 줄이면 충분.
+
+* **뉴스**: 1차 출처가 paper/repo/model/리포트 중 어느 것이냐에 따라 위 깊이 bullet 적용.
+
+**공통 마무리 bullet** (가벼운 공유 제외, 나머지 유형 필수):
+
+- **`【지금 왜 트렌드인가】`** (150~250자) — 별 수 급증, 주요 라이브러리/플랫폼 채택, 베타 신청 쇄도, 산업 발표 등 구체 화제성 신호 + **얼마나 최신인지(발표 후 며칠)**. "주목받는다" 같은 모호 표현 금지.
+- **`【우리에게 의미】`** (150~250자) — 운영 시스템 / 진행 과제 / 도입 트랙 중 **어느 것에 닿는지 1:1로 명시** (예: "우리 Memory System 과 동일 설계", "하네스 비용통제에 직접 적용"). lab_context 비어있으면 일반 AI 랩 관점에서.
+- **`【필수 메타】`** (한 줄에 압축) — 별 수·라이선스·가격·접근성·재현 코드 유무 등 압축. (렌더링은 post_card 의 `facts=` 표로도 가능 — Step 5 호출부 참조)
+- **`【출처】`** (필수) — 1차 출처 URL + **발표 날짜**. announced ≠ available 이면 구분 표기. 여러 매체면 1차 출처를 맨 앞에. (post_card 의 `source_url=` 에도 반드시 동일 URL 전달)
 - **`☐ {액션}`** (1문장) — 검토·실험·도입 결정을 위한 다음 단계. 동사로 시작. 책임자 미기재.
 
 #### 호출 예시 (논문)
@@ -332,18 +398,28 @@ post_card(
         "【방법론】 ...",
         "【실험 결과】 ...",
         "【한계 / 재현성】 ...",
-        "【지금 왜 트렌드인가】 ...",
-        "【우리에게 의미】 ...",
-        "【필수 메타】 arXiv 2605.29250 · 2026-05-23 · MIT-CSAIL & Google DeepMind · 코드·체크포인트 공개 · 13개 데이터셋 309 KB 벤치마크",
+        "【지금 왜 트렌드인가】 ... (발표 후 9일, HF Papers 일간 1위)",
+        "【우리에게 의미】 우리 Deep Research / Memory System 의 multi-source 라우팅과 직접 비교 가능.",
+        "【출처】 arXiv 2605.29250 (2026-05-23 발표) · MIT-CSAIL & Google DeepMind",
         "☐ 우리 RAG 파이프라인의 multi-source 라우팅 모듈과 비교 점수 정리",
     ],
-    source_url="https://arxiv.org/abs/2605.29250",
+    facts={                       # ← 카드 상단에 표(FactSet)로 렌더링 (선택)
+        "출처": "arXiv 2605.29250",
+        "발표일": "2026-05-23",
+        "소속": "MIT-CSAIL & Google DeepMind",
+        "코드": "공개 (체크포인트 포함)",
+        "벤치마크": "13개 데이터셋 309KB",
+    },
+    source_url="https://arxiv.org/abs/2605.29250",   # ← "원문 열기" 버튼 + dedup 기록
     summary="MIT-CSAIL+DeepMind 의 이종 KB 통합 retrieval — source-native dispatch 로 동질화 회피",
 )
 ```
 
+> `facts=` 는 **선택**이다. 주면 카드 상단에 표로 깔끔히 나오고, 안 주면 기존처럼 bullet 만 렌더링된다(하위호환). 모델 출시면 `facts={"가격":"$0.50/$1.50 per 1M","컨텍스트":"200K","한국":"가용"}` 식으로 쓰면 좋다.
+
 #### 절대 룰
-- **분량 미달 시 폐기 후 재작성**: 카드 전체 800자 미만 = 분석 깊이 부족. 자체 재검토.
+- **분량 미달 시 폐기 후 재작성**: 카드 전체 800자 미만 = 분석 깊이 부족. 자체 재검토. (가벼운 공유 유형 제외)
+- **"미확인/추정" 가드 (모델 발표·도구)**: 카드에 **가격·핵심 벤치·주요 신기능이 "미확인/추정"으로 남으면 게재 금지.** 1차 출처를 `agent-browser` 로 다시 열어 실측 후 채운다. 브라우저로도 끝내 못 구하면, 그 항목은 **"미확인"이라고 쓰지 말고 아예 빼고** 구한 사실만으로 카드를 구성한다(빈약하면 보류 처리). — 2차 매체 추정으로 칸 채우지 말 것. (검증된 실패: Opus 4.8 건에서 1차 미확보로 가격·신기능 누락)
 - **출처 없는 수치 금지**: 모든 수치는 (논문 §N / README L · / 가격표) 와 함께.
 - **`【...】` 라벨 누락 금지**: 라벨 빼고 본문만 쓰지 말 것. 라벨이 카드의 목차 역할.
 - **마지막 bullet `☐` 액션**: 동사로 시작. 액션이 정말 떠오르지 않으면 생략 가능 (전체 카드 분량 미달 안 되면).
@@ -359,6 +435,21 @@ post_card(
   - 예: `The Verge → Anthropic 공식 블로그 2026-05-25 · announced 2026-05-25, available US-only Q3 2026`
 - **모델 출시** → input/output 가격(1M tokens) + 컨텍스트 윈도우 + 한국 접근성 + 비교 대상 모델
   - 예: `Input $0.50 / Output $1.50 per 1M · 200K ctx · 한국 OK (Tier-2 region) · GPT-5.4 mini 와 동급 보고 (LMSys Arena 1240)`
+
+---
+
+## Step 6 — 학습 누적 (write-back, 필수)
+
+이 스킬의 가치는 **매 실행의 판단(CoT)에서 "재사용 가능한 교훈"만 골라 파일에 적어 복리로 쌓는 것**이다. run 을 끝내기 전에 아래를 점검해 해당되면 기록한다. (일회성 결과 — 특정 카드 본문·점수 — 는 쌓지 말 것. dedup 용 한 줄만 history 에 남으면 충분.)
+
+| 무엇을 | 어디에 | 언제 |
+|---|---|---|
+| 새 차단·SPA·우회 패턴 (예: "X사 블로그 = requests 403 → browser") | `references/scraping_tips.md` 에 한 줄 추가 | Step 0.5 에서 새 사이트 막혔을 때 |
+| 오늘 소스별 작동/차단 상태 | `references/source-status-{오늘날짜}.md` 새로 생성 | run 종료 시 (소스 1개 이상 죽었으면) |
+| 선별 캘리브레이션 교훈 (예: "펀딩 뉴스 폐기 맞음", "이 유형은 과대평가했음") | `references/curation-notes.md` 에 날짜+한 줄 | Step 4 후 의미 있는 깨달음이 있을 때만 |
+
+- 기록은 `skill_manage`(스킬 파일 수정) 또는 직접 파일 append 로. **없으면 만들고, 있으면 한 줄 덧붙인다.**
+- 과적합 주의: "이번 후보가 좋았다" 같은 건 적지 말 것. **다음 run 의 의사결정을 바꿀 일반화된 교훈**만.
 
 ---
 
